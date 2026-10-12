@@ -822,7 +822,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-romkeys(ids))
+romkeys(ids)
 
 
 def get_group_names(chapters):
