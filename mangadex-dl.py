@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) 2019-2021 eli fessler
 # Original project: https://github.com/frozenpandaman/mangadex-dl
-# Modifications: cross-platform menu, saved settings, language/group selection,
-# multi-group selection, and CBZ-by-default workflow.
+# Modifications: clean English interface, cross-platform menu, saved settings,
+# multi-group selection, folder picker, cancellation handling, and CBZ workflow.
 # License: GPL-3.0-or-later. See LICENSE.
 
 import argparse
@@ -19,7 +19,7 @@ import zipfile
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 
-A_VERSION = "0.9"
+A_VERSION = "1.0"
 API_BASE = "https://api.mangadex.org"
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_FILE = APP_DIR / "mangadex-dl-settings.json"
@@ -31,7 +31,7 @@ DEFAULT_SETTINGS = {
 }
 CONTENT_RATINGS = ("safe", "suggestive", "erotica", "pornographic")
 LANGUAGES = [
-    ("vi", "Tiếng Việt"),
+    ("vi", "Vietnamese"),
     ("en", "English"),
     ("ja", "日本語 (Japanese)"),
     ("zh", "中文简体 (Chinese Simplified)"),
@@ -40,7 +40,7 @@ LANGUAGES = [
     ("id", "Bahasa Indonesia"),
     ("th", "ไทย (Thai)"),
     ("es", "Español"),
-    ("pt-br", "Português do Brasil"),
+    ("pt-br", "Portuguese (Brazil)"),
     ("fr", "Français"),
     ("de", "Deutsch"),
     ("ru", "Русский"),
@@ -94,7 +94,7 @@ def banner(title):
     line("=")
 
 
-def pause(message="Nhấn Enter để tiếp tục..."):
+def pause(message="Press Enter to continue..."):
     try:
         input("\n" + message)
     except (EOFError, KeyboardInterrupt):
@@ -105,7 +105,7 @@ def safe_input(prompt):
     try:
         return input(prompt)
     except EOFError:
-        print("\nKhông nhận được dữ liệu nhập. Đang quay lại menu.")
+        print("\nNo input received. Returning to the menu.")
         return None
 
 
@@ -119,7 +119,7 @@ def load_settings():
     except FileNotFoundError:
         pass
     except (OSError, json.JSONDecodeError):
-        print("Cảnh báo: không đọc được file cài đặt, dùng thiết lập mặc định.")
+        print("Warning: settings file could not be read; using defaults.")
 
     settings["lang"] = str(settings.get("lang", "vi")).strip().lower() or "vi"
     pack_format = str(settings.get("pack_format", "CBZ")).upper()
@@ -137,7 +137,7 @@ def save_settings(settings):
         temp_path.replace(SETTINGS_FILE)
         return True
     except OSError as exc:
-        print("Không lưu được cài đặt: {}".format(exc))
+        print("Could not save settings: {}".format(exc))
         try:
             if temp_path.exists():
                 temp_path.unlink()
@@ -150,7 +150,7 @@ def language_label(code):
     for item_code, label in LANGUAGES:
         if code == item_code:
             return "{} ({})".format(label, code)
-    return "Mã ngôn ngữ: {}".format(code)
+    return "Language code: {}".format(code)
 
 
 def display_path(path_value):
@@ -169,9 +169,9 @@ def request_session():
     global SESSION
     if requests is None:
         raise RuntimeError(
-            "Thiếu thư viện requests.\n"
+            "The requests library is missing.\n"
             "  Windows: py -m pip install requests\n"
-            "  Termux:  pip install requests"
+            "  Termux:  python -m pip install requests"
         )
     if SESSION is None:
         SESSION = requests.Session()
@@ -193,7 +193,7 @@ def api_json(url, params=None, method="GET", json_body=None, timeout=30):
     except Exception as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         extra = " (HTTP {})".format(status) if status else ""
-        raise RuntimeError("Lỗi kết nối MangaDex{}: {}".format(extra, exc)) from exc
+        raise RuntimeError("MangaDex connection error{}: {}".format(extra, exc)) from exc
 
 
 def safe_filename(name, fallback="Unknown", max_length=120):
@@ -211,7 +211,7 @@ def find_manga_id(user_value):
     """Accept MangaDex title URL, UUID, or legacy numeric manga ID."""
     value = (user_value or "").strip()
     if not value:
-        raise ValueError("Bạn chưa nhập URL hoặc Manga ID.")
+        raise ValueError("No URL or manga ID was entered.")
 
     uuid_pattern = re.compile(
         r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
@@ -223,7 +223,7 @@ def find_manga_id(user_value):
         parsed = urlparse(value)
         path_parts = [unquote(part) for part in parsed.path.split("/") if part]
         if "chapter" in path_parts:
-            raise ValueError("Đây là URL chapter. Hãy nhập URL trang truyện (title), không phải URL chapter.")
+            raise ValueError("This is a chapter URL. Enter the manga title URL, not a chapter URL.")
         if "title" in path_parts:
             index = path_parts.index("title")
             if index + 1 < len(path_parts):
@@ -237,7 +237,7 @@ def find_manga_id(user_value):
         match = uuid_pattern.search(value)
         if match:
             return match.group(0)
-    raise ValueError("Không tìm thấy Manga ID hợp lệ. Hãy nhập URL /title/... hoặc UUID truyện.")
+    raise ValueError("Could not find a valid manga ID. Enter a /title/... URL or manga UUID.")
 
 
 def get_uuid(manga_id):
@@ -262,7 +262,7 @@ def get_uuid(manga_id):
             found = data[0].get("attributes", {}).get("newId")
             if found:
                 return found
-    raise RuntimeError("Không đổi được ID cũ sang UUID. Hãy thử dùng URL MangaDex hiện tại.")
+    raise RuntimeError("Could not convert the legacy ID to a UUID. Try using a current MangaDex title URL.")
 
 
 def get_title(manga_uuid, lang_code):
@@ -365,10 +365,10 @@ def get_group_names(chapters):
                     if name:
                         names[group_id] = name
                 except RuntimeError:
-                    names[group_id] = "Nhóm dịch không xác định"
+                    names[group_id] = "Unknown scanlation group"
     for group_id in ids:
         if group_id not in names:
-            names[group_id] = "Nhóm dịch không xác định"
+            names[group_id] = "Unknown scanlation group"
     return names
 
 
@@ -380,7 +380,7 @@ def format_wrapped_list(items, prefix=" "):
     width = max(36, min(width, 100))
     content = ", ".join(str(item) for item in items)
     if not content:
-        return prefix + "(trống)"
+        return prefix + "(empty)"
     return textwrap.fill(
         content,
         width=max(30, width - len(prefix)),
@@ -420,54 +420,52 @@ def choose_group(chapters, names):
                 group_ids.append(group_id)
             counts[group_id] = counts.get(group_id, 0) + 1
 
-    group_ids.sort(key=lambda gid: names.get(gid, "Nhóm dịch không xác định").casefold())
-    options = [(gid, names.get(gid, "Nhóm dịch không xác định"), counts.get(gid, 0))
+    group_ids.sort(key=lambda gid: names.get(gid, "Unknown scanlation group").casefold())
+    options = [(gid, names.get(gid, "Unknown scanlation group"), counts.get(gid, 0))
                for gid in group_ids]
     if has_ungrouped:
-        options.append((None, "Không ghi nhóm dịch", sum(1 for ch in chapters if not chapter_group_ids(ch))))
+        options.append((None, "No scanlation group", sum(1 for ch in chapters if not chapter_group_ids(ch))))
 
     if not options:
-        return chapters, "Tất cả nhóm dịch"
+        return chapters, "All groups"
 
-    print("\nCác nhóm dịch có trong danh sách:")
+    print("\nAvailable scanlation groups:")
     for index, (_, name, count) in enumerate(options, 1):
         print("  {}. {} ({} chapter)".format(index, name, count))
-    print("  0. Tất cả nhóm dịch")
-    print("  Enter. Tất cả nhóm dịch")
-    print("  Ví dụ chọn nhiều nhóm: 1,2,3")
+    print("  0. All groups")
+    print("  Enter. All groups")
+    print("  Example: select multiple groups with 1,2,3")
 
     while True:
-        answer = safe_input("Chọn nhóm dịch: ")
+        answer = safe_input("Choose scanlation groups: ")
         if answer is None:
-            return chapters, "Tất cả nhóm dịch"
+            return chapters, "All groups"
         answer = answer.strip()
         if answer == "" or answer == "0":
-            return chapters, "Tất cả nhóm dịch"
+            return chapters, "All groups"
 
         tokens = [token.strip() for token in answer.split(",")]
         if any(not token.isdigit() for token in tokens):
-            print("Lựa chọn không hợp lệ. Hãy nhập số, ví dụ: 1,2,3; hoặc 0 để lấy tất cả.")
+            print("Invalid choice. Enter numbers such as 1,2,3, or enter 0 for all groups.")
             continue
         indexes = list(dict.fromkeys(int(token) for token in tokens))
         if any(index == 0 for index in indexes):
-            print("Để lấy tất cả nhóm dịch, nhập riêng số 0.")
+            print("To select all groups, enter 0 by itself.")
             continue
         if any(index < 1 or index > len(options) for index in indexes):
-            print("Có số nằm ngoài danh sách. Hãy thử lại.")
+            print("One or more numbers are outside the list. Try again.")
             continue
 
         selected = [options[index - 1] for index in indexes]
-        selected_ids = {item[0] for item in selected}
+        selected_ids = {item[0] for item in selected if item[0] is not None}
+        include_ungrouped = any(item[0] is None for item in selected)
         filtered = []
         for chapter in chapters:
             ids = set(chapter_group_ids(chapter))
-            if None in selected_ids:
-                if not ids:
-                    filtered.append(chapter)
-            elif ids & selected_ids:
+            if ids & selected_ids or (include_ungrouped and not ids):
                 filtered.append(chapter)
         if not filtered:
-            print("Không tìm thấy chapter phù hợp với lựa chọn đó. Hãy thử lại.")
+            print("No chapters match that selection. Try again.")
             continue
         return filtered, ", ".join(item[1] for item in selected)
 
@@ -483,7 +481,7 @@ def choose_download_folder(current_value):
             root.withdraw()
             root.attributes("-topmost", True)
             selected = filedialog.askdirectory(
-                title="Chọn thư mục tải xuống",
+                title="Choose download folder",
                 initialdir=str(resolve_outdir(current_value)) if Path(current_value).expanduser().exists() else str(APP_DIR),
                 mustexist=True,
             )
@@ -492,13 +490,13 @@ def choose_download_folder(current_value):
                 return selected
             return None
         except Exception as exc:
-            print("Không mở được giao diện chọn thư mục: {}".format(exc))
+            print("Could not open the folder picker: {}".format(exc))
 
     # Termux + Termux:API: Android system folder picker. The normal Python
     # downloader needs a real filesystem path, so convert primary-storage SAF
     # URIs (the usual /storage/emulated/0 tree) back to their filesystem path.
     if shutil.which("termux-saf-managedir"):
-        print("\nĐang mở giao diện Android để chọn thư mục...")
+        print("\nOpening the Android folder picker...")
         try:
             result = subprocess.run(
                 ["termux-saf-managedir"],
@@ -519,16 +517,16 @@ def choose_download_folder(current_value):
                 if match:
                     relative = unquote(match.group(1)).lstrip("/")
                     return str(Path("/storage/emulated/0") / relative)
-                print("Đã chọn thư mục nhưng Android trả về URI không ánh xạ được thành đường dẫn local.")
+                print("A folder was selected, but Android returned a URI that cannot be mapped to a local path.")
             else:
-                print("Bạn đã hủy chọn thư mục.")
+                print("Folder selection cancelled.")
         except (OSError, subprocess.SubprocessError) as exc:
-            print("Không gọi được bộ chọn thư mục Termux: {}".format(exc))
+            print("Could not launch the Termux folder picker: {}".format(exc))
         return None
 
-    print("\nKhông có bộ chọn thư mục Termux (termux-saf-managedir).")
-    print("Cài Termux:API + gói termux-api để có giao diện chọn thư mục Android.")
-    print("Hoặc nhập đường dẫn thủ công.")
+    print("\nTermux folder picker (termux-saf-managedir) is unavailable.")
+    print("Install the Termux:API app and the termux-api package to use the Android folder picker.")
+    print("Or enter the folder path manually.")
     return None
 
 
@@ -558,7 +556,7 @@ def parse_chapter_selection(value, chapters):
                 print("Chapter {} does not exist. Skipping range {}.".format(upper, token))
                 continue
             if lower_index > upper_index:
-                print("Range {} bị đảo ngược. Bỏ qua.".format(token))
+                print("Range {} is reversed. Skipping.".format(token))
                 continue
             selected.extend(chapters[lower_index:upper_index + 1])
             continue
@@ -599,9 +597,9 @@ def unique_chapter_paths(root, title, chapnum, groupname, pack_format):
 def get_group_label(chapter, names):
     ids = chapter_group_ids(chapter)
     if not ids:
-        return "Không ghi nhóm dịch"
+        return "No scanlation group"
     # Stable display regardless of how MangaDex orders the relationship records.
-    labels = [names.get(group_id, "Nhóm dịch không xác định") for group_id in set(ids)]
+    labels = [names.get(group_id, "Unknown scanlation group") for group_id in set(ids)]
     labels.sort(key=str.casefold)
     return " + ".join(labels)
 
@@ -610,7 +608,7 @@ def download_chapter(chapter, index, total, title, root, group_names,
                      pack_format, datasaver):
     number = chapter_number(chapter)
     group_label = get_group_label(chapter, group_names)
-    group_safe = safe_filename(group_label, "Không ghi nhóm dịch", max_length=60)
+    group_safe = safe_filename(group_label, "No scanlation group", max_length=60)
     title_safe = safe_filename(title, "MangaDex", max_length=80)
     chapnum = "Oneshot" if number == "Oneshot" else "c" + zpad(number)
     print("Downloading chapter {} [{}/{}]".format(number, index, total))
@@ -623,7 +621,7 @@ def download_chapter(chapter, index, total, title, root, group_names,
     mode_url = "data-saver" if datasaver else "data"
     filenames = data.get(mode, []) or []
     if not base_url or not chaphash or not filenames:
-        raise RuntimeError("MangaDex không trả về danh sách ảnh cho chapter này.")
+        raise RuntimeError("MangaDex did not return an image list for this chapter.")
 
     dest_folder, archive_path = unique_chapter_paths(
         root, title_safe, chapnum, group_safe, pack_format
@@ -638,7 +636,7 @@ def download_chapter(chapter, index, total, title, root, group_names,
         outfile = dest_folder / local_name
         url = "{}/{}/{}/{}".format(base_url.rstrip("/"), mode_url, chaphash, remote_name)
         downloaded = False
-        last_problem = "lỗi không xác định"
+        last_problem = "Unknown error"
         for attempt in range(2):
             try:
                 response = session.get(url, timeout=45)
@@ -662,7 +660,7 @@ def download_chapter(chapter, index, total, title, root, group_names,
     print()
 
     if failed_pages:
-        print("CẢNH BÁO: {} ảnh tải lỗi trong chapter {}:".format(len(failed_pages), number))
+        print("WARNING: {} image(s) failed in chapter {}:".format(len(failed_pages), number))
         for page_number, problem in failed_pages:
             print("  - Trang {}: {}".format(page_number, problem))
 
@@ -672,13 +670,13 @@ def download_chapter(chapter, index, total, title, root, group_names,
             for file_path in sorted(dest_folder.iterdir(), key=lambda path: path.name.lower()):
                 if file_path.is_file() and not file_path.name.endswith(".part"):
                     archive.write(file_path, arcname=file_path.name)
-        print("Đã tạo CBZ: {}".format(archive_path.name))
+        print("Created CBZ: {}".format(archive_path.name))
         if not failed_pages:
             shutil.rmtree(dest_folder)
         else:
-            print("Giữ thư mục ảnh tạm vì có ảnh lỗi: {}".format(dest_folder.name))
+            print("Keeping the temporary image folder because some pages failed: {}".format(dest_folder.name))
     else:
-        print("Đã lưu ảnh vào: {}".format(dest_folder))
+        print("Saved images to: {}".format(dest_folder))
     return len(failed_pages)
 
 
@@ -691,7 +689,7 @@ def start_download(settings, cli_overrides=None, direct=False):
     if overrides.get("datasaver") is not None:
         datasaver = overrides["datasaver"]
     outdir = resolve_outdir(outdir_value)
-    prompt = "Enter manga URL or ID: " if direct else "Nhập URL truyện hoặc Manga ID: "
+    prompt = "Enter manga URL or ID: " if direct else "Enter manga URL or ID: "
     url = overrides.get("url")
     while not url:
         url = safe_input(prompt)
@@ -708,30 +706,30 @@ def start_download(settings, cli_overrides=None, direct=False):
         print("\nTITLE: {}".format(html.unescape(title)))
         chapters = get_chapters(manga_uuid, lang_code)
         if not chapters:
-            print("No chapters available to download! (ngôn ngữ: {})".format(lang_code))
+            print("No chapters available to download! (language: {})".format(lang_code))
             return
 
         display_chapters(chapters)
-        print("\nĐang lấy danh sách nhóm dịch...")
+        print("\nLoading scanlation groups...")
         group_names = get_group_names(chapters)
         selected_chapters, selected_group = choose_group(chapters, group_names)
         if not selected_chapters:
-            print("Nhóm dịch này không có chapter để tải.")
+            print("No chapters are available for the selected groups.")
             return
-        if selected_group != "Tất cả nhóm dịch":
-            print("\nNhóm dịch đã chọn: {}".format(selected_group))
+        if selected_group != "All groups":
+            print("\nSelected groups: {}".format(selected_group))
             display_chapters(selected_chapters, "Available chapters for selected group:")
 
         selection = safe_input("\nEnter chapter(s) to download: ")
         if selection is None or not selection.strip():
-            print("Chưa chọn chapter. Đã hủy thao tác tải.")
+            print("No chapters selected. Download cancelled.")
             return
         requested = parse_chapter_selection(selection.strip(), selected_chapters)
         if not requested:
-            print("Không có chapter hợp lệ để tải.")
+            print("There are no valid chapters to download.")
             return
 
-        print("\nNgôn ngữ: {} | Định dạng: {} | Nơi lưu: {}".format(
+        print("\nLanguage: {} | Format: {} | Output: {}".format(
             language_label(lang_code), pack_format_label(pack_format), outdir
         ))
         outdir.mkdir(parents=True, exist_ok=True)
@@ -743,64 +741,64 @@ def start_download(settings, cli_overrides=None, direct=False):
                     group_names, pack_format, datasaver
                 )
             except KeyboardInterrupt:
-                print("\nĐã nhận lệnh hủy. Các file đã tải sẽ được giữ lại.")
+                print("\nCancellation received. Already downloaded files will be kept.")
                 raise
             except Exception as exc:
                 print("\nLỖI chapter {}: {}".format(chapter_number(chapter), exc))
         if total_errors:
-            print("\nDone. Có {} ảnh tải lỗi. Xem cảnh báo ở trên.".format(total_errors))
+            print("\nDone. {} image(s) failed; see warnings above.".format(total_errors))
         else:
             print("\nDone.")
     except KeyboardInterrupt:
         raise
     except Exception as exc:
-        print("\nLỖI: {}".format(exc))
+        print("\nERROR: {}".format(exc))
 
 
 def settings_menu(settings):
     while True:
         banner("SETTING")
         print("  1. Language       [{}]".format(language_label(settings["lang"])))
-        print("  2. Đóng gói thành [{}]".format(pack_format_label(settings["pack_format"])))
-        print("  3. Nơi tải xuống  [{}]".format(display_path(settings["outdir"])))
-        print("\n  0. Quay lại")
+        print("  2. Package format [{}]".format(pack_format_label(settings["pack_format"])))
+        print("  3. Download location [{}]".format(display_path(settings["outdir"])))
+        print("\n  0. Back")
         line("-")
-        choice = safe_input("Chọn: ")
+        choice = safe_input("Choose: ")
         if choice is None or choice.strip() == "0":
             return
         choice = choice.strip()
         if choice == "1":
             banner("LANGUAGE")
             for number, (code, label) in enumerate(LANGUAGES, 1):
-                current = "  [đang dùng]" if code == settings["lang"] else ""
+                current = "  [current]" if code == settings["lang"] else ""
                 print("  {}. {} ({}){}".format(number, label, code, current))
-            print("  {}. Nhập mã ngôn ngữ khác".format(len(LANGUAGES) + 1))
-            print("  0. Quay lại")
-            answer = safe_input("Chọn ngôn ngữ: ")
+            print("  {}. Enter another language code".format(len(LANGUAGES) + 1))
+            print("  0. Back")
+            answer = safe_input("Choose language: ")
             if answer is None or answer.strip() == "0" or not answer.strip():
                 continue
             answer = answer.strip()
             if answer.isdigit() and 1 <= int(answer) <= len(LANGUAGES):
                 settings["lang"] = LANGUAGES[int(answer) - 1][0]
             elif answer == str(len(LANGUAGES) + 1):
-                code = safe_input("Nhập mã ngôn ngữ MangaDex (ví dụ: it, pl, tr): ")
+                code = safe_input("Enter a MangaDex language code (e.g. it, pl, tr): ")
                 if code and re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{2,8})?", code.strip().lower()):
                     settings["lang"] = code.strip().lower()
                 else:
-                    print("Mã ngôn ngữ không hợp lệ.")
+                    print("Invalid language code.")
                     pause()
                     continue
             else:
-                print("Lựa chọn không hợp lệ.")
+                print("Invalid choice.")
                 pause()
                 continue
             save_settings(settings)
         elif choice == "2":
-            banner("ĐÓNG GÓI CHAPTER")
-            print("  1. Folder - lưu ảnh rời trong thư mục chapter")
-            print("  2. CBZ    - đóng gói mỗi chapter thành một file .cbz")
-            print("  0. Quay lại")
-            answer = safe_input("Chọn định dạng: ")
+            banner("CHAPTER OUTPUT FORMAT")
+            print("  1. Folder - save page images in a chapter folder")
+            print("  2. CBZ    - package each chapter as a .cbz file")
+            print("  0. Back")
+            answer = safe_input("Choose format: ")
             if answer is None or answer.strip() == "0" or not answer.strip():
                 continue
             if answer.strip() == "1":
@@ -808,17 +806,17 @@ def settings_menu(settings):
             elif answer.strip() == "2":
                 settings["pack_format"] = "CBZ"
             else:
-                print("Lựa chọn không hợp lệ.")
+                print("Invalid choice.")
                 pause()
                 continue
             save_settings(settings)
         elif choice == "3":
-            banner("NƠI TẢI XUỐNG")
-            print("Thư mục hiện tại: {}".format(display_path(settings["outdir"])))
-            print("  1. Chọn thư mục bằng giao diện")
-            print("  2. Nhập đường dẫn thủ công")
-            print("  0. Quay lại")
-            answer = safe_input("Chọn: ")
+            banner("DOWNLOAD LOCATION")
+            print("Current folder: {}".format(display_path(settings["outdir"])))
+            print("  1. Choose folder using the picker")
+            print("  2. Enter path manually")
+            print("  0. Back")
+            answer = safe_input("Choose: ")
             if answer is None or answer.strip() == "0" or not answer.strip():
                 continue
             answer = answer.strip()
@@ -826,23 +824,23 @@ def settings_menu(settings):
             if answer == "1":
                 selected_path = choose_download_folder(settings["outdir"])
                 if not selected_path:
-                    pause("Không thay đổi nơi tải xuống. Nhấn Enter...")
+                    pause("Download location unchanged. Press Enter...")
                     continue
             elif answer == "2":
-                manual = safe_input("Nhập đường dẫn: ")
+                manual = safe_input("Enter path: ")
                 if manual is None or not manual.strip():
                     continue
                 selected_path = manual.strip()
             else:
-                print("Lựa chọn không hợp lệ.")
+                print("Invalid choice.")
                 pause()
                 continue
             settings["outdir"] = selected_path
             save_settings(settings)
-            print("Đã lưu nơi tải xuống: {}".format(display_path(settings["outdir"])))
+            print("Saved download location: {}".format(display_path(settings["outdir"])))
             pause()
         else:
-            print("Lựa chọn không hợp lệ.")
+            print("Invalid choice.")
             pause()
 
 
@@ -850,13 +848,13 @@ def main_menu(settings):
     while True:
         banner("MANGADEX-DL v{}".format(A_VERSION))
         print("\nMENU")
-        print("  1. Bắt đầu tải truyện")
-        print("  2. Cài đặt")
-        print("  0. Thoát")
+        print("  1. Start downloading")
+        print("  2. Settings")
+        print("  0. Exit")
         line("-")
-        choice = safe_input("Chọn: ")
+        choice = safe_input("Choose: ")
         if choice is None or choice.strip() == "0":
-            print("Đã thoát MangaDex-DL.")
+            print("MangaDex-DL exited.")
             return
         choice = choice.strip()
         if choice == "1":
@@ -864,30 +862,30 @@ def main_menu(settings):
             try:
                 start_download(settings)
             except KeyboardInterrupt:
-                print("\nĐã hủy thao tác.")
-            pause("Nhấn Enter để quay lại menu chính...")
+                print("\nOperation cancelled.")
+            pause("Press Enter to return to the main menu...")
         elif choice == "2":
             settings_menu(settings)
         else:
-            print("Lựa chọn không hợp lệ.")
+            print("Invalid choice.")
             pause()
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Tải manga từ MangaDex (bản có menu PC/Termux)."
+        description="Download manga from MangaDex (PC/Termux menu version)."
     )
-    parser.add_argument("url", nargs="?", help="URL hoặc Manga ID (bỏ qua menu nếu cung cấp)")
+    parser.add_argument("url", nargs="?", help="Manga URL or ID (skip the menu when provided)")
     parser.add_argument("-l", dest="lang", default=None,
-                        help="mã ngôn ngữ chapter, mặc định lấy từ cài đặt (ban đầu: vi)")
+                        help="chapter language code (defaults to saved settings; initial default: vi)")
     parser.add_argument("-d", dest="datasaver", action="store_true", default=None,
-                        help="tải ảnh data-saver, dung lượng thấp hơn")
+                        help="download data-saver images at lower quality")
     parser.add_argument("-a", dest="cbz", action="store_true", default=None,
-                        help="đóng gói chapter thành CBZ")
+                        help="package each chapter as a CBZ archive")
     parser.add_argument("--no-cbz", dest="no_cbz", action="store_true", default=None,
-                        help="lưu ảnh trong thư mục thay vì CBZ")
+                        help="save page images in a folder instead of a CBZ archive")
     parser.add_argument("-o", dest="outdir", default=None,
-                        help="thư mục đầu ra")
+                        help="output directory")
     return parser.parse_args()
 
 
@@ -913,1026 +911,20 @@ def cli_main(args, settings):
     try:
         start_download(settings, overrides, direct=True)
     except KeyboardInterrupt:
-        print("\nĐã hủy thao tác.")
-    pause("Nhấn Enter để kết thúc...")
+        print("\nOperation cancelled.")
+    pause("Press Enter to finish...")
 
 
 def main():
-    print("MangaDex-DL v{} | PC + Termux".format(A_VERSION))
+    print("MangaDex-DL v{} | PC + Termux | English".format(A_VERSION))
     settings = load_settings()
     try:
         cli_main(parse_args(), settings)
     except KeyboardInterrupt:
-        print("\nĐã thoát chương trình.")
+        print("\nProgram exited.")
     except Exception as exc:
-        print("LỖI: {}".format(exc))
-        pause("Nhấn Enter để đóng chương trình...")
-
-
-if __name__ == "__main__":
-    main()
-oup_id not in ids:
-                ids.append(group_id)
-    names = {}
-    for start in range(0, len(ids), 40):
-        batch = ids[start:start + 40]
-        params = [("ids[]", group_id) for group_id in batch]
-        params.append(("limit", 100))
-        try:
-            response = api_json(API_BASE + "/group", params=params)
-            for group in response.get("data", []) or []:
-                group_id = group.get("id")
-                name = group.get("attributes", {}).get("name")
-                if group_id and name:
-                    names[group_id] = name
-        except RuntimeError:
-            for group_id in batch:
-                try:
-                    response = api_json(API_BASE + "/group/{}".format(group_id))
-                    group = response.get("data", {})
-                    name = group.get("attributes", {}).get("name")
-                    if name:
-                        names[group_id] = name
-                except RuntimeError:
-                    names[group_id] = "Nhóm dịch không xác định"
-    for group_id in ids:
-        if group_id not in names:
-            names[group_id] = "Nhóm dịch không xác định"
-    return names
-
-
-def format_wrapped_list(items, prefix=" "):
-    try:
-        width = shutil.get_terminal_size((78, 20)).columns
-    except Exception:
-        width = 78
-    width = max(36, min(width, 100))
-    content = ", ".join(str(item) for item in items)
-    if not content:
-        return prefix + "(trống)"
-    return textwrap.fill(
-        content,
-        width=max(30, width - len(prefix)),
-        initial_indent=prefix,
-        subsequent_indent=prefix,
-        break_long_words=False,
-        break_on_hyphens=False,
-    )
-
-
-def display_chapters(chapters, heading="Available chapters:"):
-    print(heading)
-    numbers = [chapter_number(chapter) for chapter in chapters]
-    print(format_wrapped_list(numbers))
-
-
-def make_group_options(chapters, names):
-    """Build options from release combinations, not individual group IDs."""
-    counts = {}
-    for chapter in chapters:
-        key = group_key(chapter)
-        counts[key] = counts.get(key, 0) + 1
-
-    options = []
-    for key, count in counts.items():
-        if key is None:
-            label = "Không ghi nhóm dịch"
-        else:
-            # Sorted IDs also make 'A + B' and 'B + A' the same combination.
-            labels = [names.get(group_id, "Nhóm dịch không xác định") for group_id in key]
-            labels.sort(key=str.casefold)
-            label = " + ".join(labels)
-        options.append((key, label, count))
-
-    # Sort named groups alphabetically; put releases without a group at the end.
-    options.sort(key=lambda item: (item[0] is None, item[1].casefold()))
-    return options
-
-
-def choose_group(chapters, names):
-    """Allow a single group-combination or multiple choices such as '1,2,3'."""
-    options = make_group_options(chapters, names)
-    print("\nCác nhóm dịch / tổ hợp nhóm dịch có trong danh sách:")
-    for index, (_, name, count) in enumerate(options, 1):
-        unit = "bản phát hành" if count != 1 else "bản phát hành"
-        print("  {}. {} ({} {})".format(index, name, count, unit))
-    print("  0. Tất cả nhóm dịch")
-    print("  Enter. Tất cả nhóm dịch")
-    print("  Ví dụ chọn nhiều nhóm: 1,2,3")
-
-    while True:
-        answer = safe_input("Chọn nhóm dịch: ")
-        if answer is None:
-            return chapters, "Tất cả nhóm dịch"
-        answer = answer.strip()
-        if answer == "" or answer == "0":
-            return chapters, "Tất cả nhóm dịch"
-
-        # A comma-separated list is supported; reject empty/invalid tokens.
-        tokens = [token.strip() for token in answer.split(",")]
-        if any(not token.isdigit() for token in tokens):
-            print("Lựa chọn không hợp lệ. Hãy nhập số, ví dụ: 1,2,3; hoặc 0 để lấy tất cả.")
-            continue
-        indexes = [int(token) for token in tokens]
-        if any(index == 0 for index in indexes):
-            print("Để lấy tất cả nhóm dịch, nhập riêng số 0.")
-            continue
-        if any(index < 1 or index > len(options) for index in indexes):
-            print("Có số nằm ngoài danh sách. Hãy thử lại.")
-            continue
-
-        # De-duplicate choices but preserve the order typed by the user.
-        indexes = list(dict.fromkeys(indexes))
-        selected_keys = {options[index - 1][0] for index in indexes}
-        selected_names = [options[index - 1][1] for index in indexes]
-        filtered = [chapter for chapter in chapters if group_key(chapter) in selected_keys]
-        if not filtered:
-            print("Không tìm thấy chapter phù hợp với lựa chọn đó. Hãy thử lại.")
-            continue
-        return filtered, ", ".join(selected_names)
-
-
-def parse_chapter_selection(value, chapters):
-    selected = []
-    chapter_values = [None if chapter_number(ch) == "Oneshot" else chapter_number(ch)
-                      for ch in chapters]
-    tokens = [token.strip() for token in value.split(",") if token.strip()]
-    for token in tokens:
-        if token.lower() == "oneshot":
-            matches = [ch for ch in chapters if chapter_number(ch) == "Oneshot"]
-            if matches:
-                selected.extend(matches)
-            else:
-                print("Chapter Oneshot does not exist. Skipping.")
-            continue
-        if "-" in token:
-            lower, upper = [part.strip() for part in token.split("-", 1)]
-            try:
-                lower_index = chapter_values.index(lower)
-            except ValueError:
-                print("Chapter {} does not exist. Skipping range {}.".format(lower, token))
-                continue
-            try:
-                upper_index = chapter_values.index(upper)
-            except ValueError:
-                print("Chapter {} does not exist. Skipping range {}.".format(upper, token))
-                continue
-            if lower_index > upper_index:
-                print("Range {} bị đảo ngược. Bỏ qua.".format(token))
-                continue
-            selected.extend(chapters[lower_index:upper_index + 1])
-            continue
-        matches = [ch for ch in chapters if chapter_number(ch) == token]
-        if matches:
-            selected.extend(matches)
-        else:
-            print("Chapter {} does not exist. Skipping.".format(token))
-    # Don't download a record twice if selections overlap (e.g. '1-3,2').
-    result = []
-    seen = set()
-    for chapter in selected:
-        chapter_id = chapter.get("id")
-        key = chapter_id if chapter_id else id(chapter)
-        if key not in seen:
-            seen.add(key)
-            result.append(chapter)
-    return result
-
-
-def unique_chapter_paths(root, title, chapnum, groupname, pack_format):
-    title_dir = root / title
-    title_dir.mkdir(parents=True, exist_ok=True)
-    counter = 0
-    while True:
-        suffix = "" if counter == 0 else "-{}".format(counter)
-        folder_name = "{}{} [{}]".format(chapnum, suffix, groupname)
-        folder_path = title_dir / folder_name
-        archive_name = "{} {} [{}].cbz".format(title, chapnum + suffix, groupname)
-        archive_path = title_dir / archive_name
-        folder_conflict = folder_path.exists()
-        archive_conflict = pack_format == "CBZ" and archive_path.exists()
-        if not folder_conflict and not archive_conflict:
-            return folder_path, archive_path
-        counter += 1
-
-
-def get_group_label(chapter, names):
-    ids = chapter_group_ids(chapter)
-    if not ids:
-        return "Không ghi nhóm dịch"
-    # Stable display regardless of how MangaDex orders the relationship records.
-    labels = [names.get(group_id, "Nhóm dịch không xác định") for group_id in set(ids)]
-    labels.sort(key=str.casefold)
-    return " + ".join(labels)
-
-
-def download_chapter(chapter, index, total, title, root, group_names,
-                     pack_format, datasaver):
-    number = chapter_number(chapter)
-    group_label = get_group_label(chapter, group_names)
-    group_safe = safe_filename(group_label, "Không ghi nhóm dịch", max_length=60)
-    title_safe = safe_filename(title, "MangaDex", max_length=80)
-    chapnum = "Oneshot" if number == "Oneshot" else "c" + zpad(number)
-    print("Downloading chapter {} [{}/{}]".format(number, index, total))
-
-    chapter_data = api_json(API_BASE + "/at-home/server/{}".format(chapter["id"]))
-    base_url = chapter_data.get("baseUrl")
-    data = chapter_data.get("chapter", {})
-    chaphash = data.get("hash")
-    mode = "dataSaver" if datasaver else "data"
-    mode_url = "data-saver" if datasaver else "data"
-    filenames = data.get(mode, []) or []
-    if not base_url or not chaphash or not filenames:
-        raise RuntimeError("MangaDex không trả về danh sách ảnh cho chapter này.")
-
-    dest_folder, archive_path = unique_chapter_paths(
-        root, title_safe, chapnum, group_safe, pack_format
-    )
-    dest_folder.mkdir(parents=True, exist_ok=False)
-    failed_pages = []
-    session = request_session()
-
-    for page_number, remote_name in enumerate(filenames, 1):
-        ext = Path(unquote(urlparse(remote_name).path)).suffix or ".jpg"
-        local_name = "{:03d}{}".format(page_number, ext.lower())
-        outfile = dest_folder / local_name
-        url = "{}/{}/{}/{}".format(base_url.rstrip("/"), mode_url, chaphash, remote_name)
-        downloaded = False
-        last_problem = "lỗi không xác định"
-        for attempt in range(2):
-            try:
-                response = session.get(url, timeout=45)
-                response.raise_for_status()
-                temp_file = outfile.with_suffix(outfile.suffix + ".part")
-                with temp_file.open("wb") as file:
-                    file.write(response.content)
-                temp_file.replace(outfile)
-                downloaded = True
-                break
-            except Exception as exc:
-                last_problem = str(exc)
-                if attempt == 0:
-                    time.sleep(2)
-        print("\r{} Downloading pages [{}/{}]".format(
-            "|/–\\"[(page_number - 1) % 4], page_number, len(filenames)
-        ), end="", flush=True)
-        if not downloaded:
-            failed_pages.append((page_number, last_problem))
-        time.sleep(0.2)
-    print()
-
-    if failed_pages:
-        print("CẢNH BÁO: {} ảnh tải lỗi trong chapter {}:".format(len(failed_pages), number))
-        for page_number, problem in failed_pages:
-            print("  - Trang {}: {}".format(page_number, problem))
-
-    if pack_format == "CBZ":
-        # ZIP_STORED keeps original image bytes unchanged; images are not recompressed.
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_STORED) as archive:
-            for file_path in sorted(dest_folder.iterdir(), key=lambda path: path.name.lower()):
-                if file_path.is_file() and not file_path.name.endswith(".part"):
-                    archive.write(file_path, arcname=file_path.name)
-        print("Đã tạo CBZ: {}".format(archive_path.name))
-        if not failed_pages:
-            shutil.rmtree(dest_folder)
-        else:
-            print("Giữ thư mục ảnh tạm vì có ảnh lỗi: {}".format(dest_folder.name))
-    else:
-        print("Đã lưu ảnh vào: {}".format(dest_folder))
-    return len(failed_pages)
-
-
-def start_download(settings, cli_overrides=None, direct=False):
-    overrides = cli_overrides or {}
-    lang_code = overrides.get("lang") or settings["lang"]
-    pack_format = overrides.get("pack_format") or settings["pack_format"]
-    outdir_value = overrides.get("outdir") or settings["outdir"]
-    datasaver = settings.get("datasaver", False)
-    if overrides.get("datasaver") is not None:
-        datasaver = overrides["datasaver"]
-    outdir = resolve_outdir(outdir_value)
-    prompt = "Enter manga URL or ID: " if direct else "Nhập URL truyện hoặc Manga ID: "
-    url = overrides.get("url")
-    while not url:
-        url = safe_input(prompt)
-        if url is None:
-            return
-        url = url.strip()
-        if not url:
-            url = None
-
-    try:
-        manga_id = find_manga_id(url)
-        manga_uuid = get_uuid(manga_id)
-        title = get_title(manga_uuid, lang_code)
-        print("\nTITLE: {}".format(html.unescape(title)))
-        chapters = get_chapters(manga_uuid, lang_code)
-        if not chapters:
-            print("No chapters available to download! (ngôn ngữ: {})".format(lang_code))
-            return
-
-        display_chapters(chapters)
-        print("\nĐang lấy danh sách nhóm dịch...")
-        group_names = get_group_names(chapters)
-        selected_chapters, selected_group = choose_group(chapters, group_names)
-        if not selected_chapters:
-            print("Nhóm dịch này không có chapter để tải.")
-            return
-        if selected_group != "Tất cả nhóm dịch":
-            print("\nNhóm dịch đã chọn: {}".format(selected_group))
-            display_chapters(selected_chapters, "Available chapters for selected group:")
-
-        selection = safe_input("\nEnter chapter(s) to download: ")
-        if selection is None or not selection.strip():
-            print("Chưa chọn chapter. Đã hủy thao tác tải.")
-            return
-        requested = parse_chapter_selection(selection.strip(), selected_chapters)
-        if not requested:
-            print("Không có chapter hợp lệ để tải.")
-            return
-
-        print("\nNgôn ngữ: {} | Định dạng: {} | Nơi lưu: {}".format(
-            language_label(lang_code), pack_format_label(pack_format), outdir
-        ))
-        outdir.mkdir(parents=True, exist_ok=True)
-        total_errors = 0
-        for index, chapter in enumerate(requested, 1):
-            try:
-                total_errors += download_chapter(
-                    chapter, index, len(requested), title, outdir,
-                    group_names, pack_format, datasaver
-                )
-            except KeyboardInterrupt:
-                print("\nĐã nhận lệnh hủy. Các file đã tải sẽ được giữ lại.")
-                raise
-            except Exception as exc:
-                print("\nLỖI chapter {}: {}".format(chapter_number(chapter), exc))
-        if total_errors:
-            print("\nDone. Có {} ảnh tải lỗi. Xem cảnh báo ở trên.".format(total_errors))
-        else:
-            print("\nDone.")
-    except KeyboardInterrupt:
-        raise
-    except Exception as exc:
-        print("\nLỖI: {}".format(exc))
-
-
-def settings_menu(settings):
-    while True:
-        banner("SETTING")
-        print("  1. Language       [{}]".format(language_label(settings["lang"])))
-        print("  2. Đóng gói thành [{}]".format(pack_format_label(settings["pack_format"])))
-        print("  3. Nơi tải xuống  [{}]".format(display_path(settings["outdir"])))
-        print("\n  0. Quay lại")
-        line("-")
-        choice = safe_input("Chọn: ")
-        if choice is None or choice.strip() == "0":
-            return
-        choice = choice.strip()
-        if choice == "1":
-            banner("LANGUAGE")
-            for number, (code, label) in enumerate(LANGUAGES, 1):
-                current = "  [đang dùng]" if code == settings["lang"] else ""
-                print("  {}. {} ({}){}".format(number, label, code, current))
-            print("  {}. Nhập mã ngôn ngữ khác".format(len(LANGUAGES) + 1))
-            print("  0. Quay lại")
-            answer = safe_input("Chọn ngôn ngữ: ")
-            if answer is None or answer.strip() == "0" or not answer.strip():
-                continue
-            answer = answer.strip()
-            if answer.isdigit() and 1 <= int(answer) <= len(LANGUAGES):
-                settings["lang"] = LANGUAGES[int(answer) - 1][0]
-            elif answer == str(len(LANGUAGES) + 1):
-                code = safe_input("Nhập mã ngôn ngữ MangaDex (ví dụ: it, pl, tr): ")
-                if code and re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{2,8})?", code.strip().lower()):
-                    settings["lang"] = code.strip().lower()
-                else:
-                    print("Mã ngôn ngữ không hợp lệ.")
-                    pause()
-                    continue
-            else:
-                print("Lựa chọn không hợp lệ.")
-                pause()
-                continue
-            save_settings(settings)
-        elif choice == "2":
-            banner("ĐÓNG GÓI CHAPTER")
-            print("  1. Folder - lưu ảnh rời trong thư mục chapter")
-            print("  2. CBZ    - đóng gói mỗi chapter thành một file .cbz")
-            print("  0. Quay lại")
-            answer = safe_input("Chọn định dạng: ")
-            if answer is None or answer.strip() == "0" or not answer.strip():
-                continue
-            if answer.strip() == "1":
-                settings["pack_format"] = "FOLDER"
-            elif answer.strip() == "2":
-                settings["pack_format"] = "CBZ"
-            else:
-                print("Lựa chọn không hợp lệ.")
-                pause()
-                continue
-            save_settings(settings)
-        elif choice == "3":
-            banner("NƠI TẢI XUỐNG")
-            print("Thư mục hiện tại: {}".format(display_path(settings["outdir"])))
-            print("Nhập đường dẫn mới (đường dẫn tương đối tính từ thư mục chứa script).")
-            print("Để trống để giữ nguyên; nhập 'download' để dùng thư mục mặc định.")
-            answer = safe_input("Đường dẫn mới: ")
-            if answer is None or not answer.strip():
-                continue
-            settings["outdir"] = answer.strip()
-            save_settings(settings)
-            print("Đã lưu nơi tải xuống: {}".format(display_path(settings["outdir"])))
-            pause()
-        else:
-            print("Lựa chọn không hợp lệ.")
-            pause()
-
-
-def main_menu(settings):
-    while True:
-        banner("MANGADEX-DL v{}".format(A_VERSION))
-        print("\nMENU")
-        print("  1. Bắt đầu tải truyện")
-        print("  2. Cài đặt")
-        print("  0. Thoát")
-        line("-")
-        choice = safe_input("Chọn: ")
-        if choice is None or choice.strip() == "0":
-            print("Đã thoát MangaDex-DL.")
-            return
-        choice = choice.strip()
-        if choice == "1":
-            line("=")
-            try:
-                start_download(settings)
-            except KeyboardInterrupt:
-                print("\nĐã hủy thao tác.")
-            pause("Nhấn Enter để quay lại menu chính...")
-        elif choice == "2":
-            settings_menu(settings)
-        else:
-            print("Lựa chọn không hợp lệ.")
-            pause()
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Tải manga từ MangaDex (bản có menu PC/Termux)."
-    )
-    parser.add_argument("url", nargs="?", help="URL hoặc Manga ID (bỏ qua menu nếu cung cấp)")
-    parser.add_argument("-l", dest="lang", default=None,
-                        help="mã ngôn ngữ chapter, mặc định lấy từ cài đặt (ban đầu: vi)")
-    parser.add_argument("-d", dest="datasaver", action="store_true", default=None,
-                        help="tải ảnh data-saver, dung lượng thấp hơn")
-    parser.add_argument("-a", dest="cbz", action="store_true", default=None,
-                        help="đóng gói chapter thành CBZ")
-    parser.add_argument("--no-cbz", dest="no_cbz", action="store_true", default=None,
-                        help="lưu ảnh trong thư mục thay vì CBZ")
-    parser.add_argument("-o", dest="outdir", default=None,
-                        help="thư mục đầu ra")
-    return parser.parse_args()
-
-
-def cli_main(args, settings):
-    direct = any(value is not None for value in (
-        args.url, args.lang, args.datasaver, args.cbz, args.no_cbz, args.outdir
-    ))
-    if not direct:
-        main_menu(settings)
-        return
-    pack_format = None
-    if args.no_cbz:
-        pack_format = "FOLDER"
-    elif args.cbz:
-        pack_format = "CBZ"
-    overrides = {
-        "url": args.url,
-        "lang": args.lang,
-        "datasaver": args.datasaver,
-        "pack_format": pack_format,
-        "outdir": args.outdir,
-    }
-    try:
-        start_download(settings, overrides, direct=True)
-    except KeyboardInterrupt:
-        print("\nĐã hủy thao tác.")
-    pause("Nhấn Enter để kết thúc...")
-
-
-def main():
-    print("MangaDex-DL v{} | PC + Termux".format(A_VERSION))
-    settings = load_settings()
-    try:
-        cli_main(parse_args(), settings)
-    except KeyboardInterrupt:
-        print("\nĐã thoát chương trình.")
-    except Exception as exc:
-        print("LỖI: {}".format(exc))
-        pause("Nhấn Enter để đóng chương trình...")
-
-
-if __name__ == "__main__":
-    main()
-romkeys(ids)
-
-
-def get_group_names(chapters):
-    ids = []
-    for chapter in chapters:
-        for group_id in chapter_group_ids(chapter):
-            if group_id not in ids:
-                ids.append(group_id)
-
-    names = {}
-    # MangaDex supports ids[] filters. Batch requests to keep URLs manageable.
-    for start in range(0, len(ids), 40):
-        batch = ids[start:start + 40]
-        params = [("ids[]", group_id) for group_id in batch]
-        params.append(("limit", 100))
-        try:
-            response = api_json(API_BASE + "/group", params=params)
-            for group in response.get("data", []) or []:
-                group_id = group.get("id")
-                name = group.get("attributes", {}).get("name")
-                if group_id and name:
-                    names[group_id] = name
-        except RuntimeError:
-            # Fall back to individual lookup if batch lookup is unsupported.
-            for group_id in batch:
-                try:
-                    response = api_json(API_BASE + "/group/{}".format(group_id))
-                    group = response.get("data", {})
-                    name = group.get("attributes", {}).get("name")
-                    if name:
-                        names[group_id] = name
-                except RuntimeError:
-                    names[group_id] = "Nhóm dịch không xác định"
-
-    for group_id in ids:
-        if group_id not in names:
-            names[group_id] = "Nhóm dịch không xác định"
-    return names
-
-
-def format_wrapped_list(items, prefix=" "):
-    width = shutil.get_terminal_size((78, 20)).columns
-    width = max(36, min(width, 100))
-    content = ", ".join(str(item) for item in items)
-    if not content:
-        return prefix + "(trống)"
-    return textwrap.fill(
-        content,
-        width=max(30, width - len(prefix)),
-        initial_indent=prefix,
-        subsequent_indent=prefix,
-        break_long_words=False,
-        break_on_hyphens=False,
-    )
-
-
-def display_chapters(chapters, heading="Available chapters:"):
-    print(heading)
-    numbers = [chapter_number(chapter) for chapter in chapters]
-    print(format_wrapped_list(numbers))
-
-
-def make_group_options(chapters, names):
-    counts = {}
-
-    for chapter in chapters:
-        group_ids = chapter_group_ids(chapter)
-
-        if not group_ids:
-            key = None
-        else:
-            key = tuple(sorted(set(group_ids)))
-
-        counts[key] = counts.get(key, 0) + 1
-
-    options = []
-
-    for group_key, count in counts.items():
-        if group_key is None:
-            name = "Không ghi nhóm dịch"
-        else:
-            labels = [
-                names.get(group_id, "Nhóm dịch không xác định")
-                for group_id in group_key
-            ]
-            name = " + ".join(labels)
-
-        options.append((group_key, name, count))
-
-    options.sort(key=lambda item: item[1].casefold())
-
-    return options
-
-
-def choose_group(chapters, names):
-    options = make_group_options(chapters, names)
-    print("\nCác nhóm dịch có trong danh sách:")
-    for index, (_, name, count) in enumerate(options, 1):
-        print("  {}. {} ({} chapter)".format(index, name, count))
-    print("  0. Tất cả nhóm dịch")
-    print("  Enter. Tất cả nhóm dịch")
-
-    while True:
-        answer = safe_input("Chọn nhóm dịch: ")
-        if answer is None:
-            return chapters, "Tất cả nhóm dịch"
-        answer = answer.strip()
-        if answer == "" or answer == "0":
-            return chapters, "Tất cả nhóm dịch"
-        if answer.isdigit() and 1 <= int(answer) <= len(options):
-            group_id, group_name, _ = options[int(answer) - 1]
-            if group_id is None:
-                filtered = [ch for ch in chapters if not chapter_group_ids(ch)]
-            else:
-                filtered = [ch for ch in chapters if group_id in chapter_group_ids(ch)]
-            return filtered, group_name
-        print("Lựa chọn không hợp lệ. Hãy nhập số trong danh sách, hoặc 0 để lấy tất cả.")
-
-
-def parse_chapter_selection(value, chapters):
-    selected = []
-    chapter_values = [None if chapter_number(ch) == "Oneshot" else chapter_number(ch)
-                      for ch in chapters]
-    tokens = [token.strip() for token in value.split(",") if token.strip()]
-    for token in tokens:
-        if token.lower() == "oneshot":
-            matches = [ch for ch in chapters if chapter_number(ch) == "Oneshot"]
-            if matches:
-                selected.extend(matches)
-            else:
-                print("Chapter Oneshot does not exist. Skipping.")
-            continue
-
-        # A range is based on chapter-list order, preserving the original tool's behavior.
-        if "-" in token:
-            lower, upper = [part.strip() for part in token.split("-", 1)]
-            try:
-                lower_index = chapter_values.index(lower)
-            except ValueError:
-                print("Chapter {} does not exist. Skipping range {}.".format(lower, token))
-                continue
-            try:
-                upper_index = chapter_values.index(upper)
-            except ValueError:
-                print("Chapter {} does not exist. Skipping range {}.".format(upper, token))
-                continue
-            if lower_index > upper_index:
-                print("Range {} bị đảo ngược. Bỏ qua.".format(token))
-                continue
-            selected.extend(chapters[lower_index:upper_index + 1])
-            continue
-
-        matches = [ch for ch in chapters if chapter_number(ch) == token]
-        if matches:
-            # Preserve original behavior: if a number exists in multiple releases,
-            # selecting that number downloads each matching release in the active group filter.
-            selected.extend(matches)
-        else:
-            print("Chapter {} does not exist. Skipping.".format(token))
-    return selected
-
-
-def unique_chapter_paths(root, title, chapnum, groupname, pack_format):
-    title_dir = root / title
-    title_dir.mkdir(parents=True, exist_ok=True)
-    base = "{} [{}]".format(chapnum, groupname)
-    counter = 0
-    while True:
-        suffix = "" if counter == 0 else "-{}".format(counter)
-        folder_name = "{}{}".format(chapnum, suffix) + " [{}]".format(groupname)
-        folder_path = title_dir / folder_name
-        archive_name = "{} {} [{}].cbz".format(title, chapnum + suffix, groupname)
-        archive_path = title_dir / archive_name
-        folder_conflict = folder_path.exists()
-        archive_conflict = pack_format == "CBZ" and archive_path.exists()
-        if not folder_conflict and not archive_conflict:
-            return folder_path, archive_path
-        counter += 1
-
-
-def get_group_label(chapter, names):
-    group_ids = chapter_group_ids(chapter)
-    if not group_ids:
-        return "Không ghi nhóm dịch"
-    labels = [names.get(group_id, "Nhóm dịch không xác định") for group_id in group_ids]
-    return " & ".join(labels)
-
-
-def download_chapter(chapter, index, total, title, root, group_names,
-                     pack_format, datasaver):
-    number = chapter_number(chapter)
-    group_label = get_group_label(chapter, group_names)
-    group_safe = safe_filename(group_label, "Không ghi nhóm dịch", max_length=60)
-    title_safe = safe_filename(title, "MangaDex", max_length=80)
-    chapnum = "Oneshot" if number == "Oneshot" else "c" + zpad(number)
-
-    print("Downloading chapter {} [{}/{}]".format(number, index, total))
-    chapter_data = api_json(API_BASE + "/at-home/server/{}".format(chapter["id"]))
-    base_url = chapter_data.get("baseUrl")
-    data = chapter_data.get("chapter", {})
-    chaphash = data.get("hash")
-    mode = "dataSaver" if datasaver else "data"
-    mode_url = "data-saver" if datasaver else "data"
-    filenames = data.get(mode, []) or []
-    if not base_url or not chaphash or not filenames:
-        raise RuntimeError("MangaDex không trả về danh sách ảnh cho chapter này.")
-
-    dest_folder, archive_path = unique_chapter_paths(
-        root, title_safe, chapnum, group_safe, pack_format
-    )
-    dest_folder.mkdir(parents=True, exist_ok=False)
-    failed_pages = []
-    session = request_session()
-
-    for page_number, remote_name in enumerate(filenames, 1):
-        ext = Path(unquote(urlparse(remote_name).path)).suffix or ".jpg"
-        # MangaDex page names are not used as local names: simple numeric names sort reliably.
-        local_name = "{:03d}{}".format(page_number, ext.lower())
-        outfile = dest_folder / local_name
-        url = "{}/{}/{}/{}".format(base_url.rstrip("/"), mode_url, chaphash, remote_name)
-        downloaded = False
-        last_problem = "lỗi không xác định"
-        for attempt in range(2):
-            try:
-                response = session.get(url, timeout=45)
-                response.raise_for_status()
-                temp_file = outfile.with_suffix(outfile.suffix + ".part")
-                with temp_file.open("wb") as file:
-                    file.write(response.content)
-                temp_file.replace(outfile)
-                downloaded = True
-                break
-            except Exception as exc:
-                last_problem = str(exc)
-                if attempt == 0:
-                    time.sleep(2)
-        print("\r{} Downloading pages [{}/{}]".format(
-            "|/–\\"[(page_number - 1) % 4], page_number, len(filenames)
-        ), end="", flush=True)
-        if not downloaded:
-            failed_pages.append((page_number, last_problem))
-        time.sleep(0.2)  # Keep the original tool's conservative request pacing.
-
-    print()
-    if failed_pages:
-        print("CẢNH BÁO: {} ảnh tải lỗi trong chapter {}:".format(len(failed_pages), number))
-        for page_number, problem in failed_pages:
-            print("  - Trang {}: {}".format(page_number, problem))
-
-    if pack_format == "CBZ":
-        # Store images without recompressing them. Image quality/bytes remain unchanged.
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_STORED) as archive:
-            for file_path in sorted(dest_folder.iterdir(), key=lambda p: p.name.lower()):
-                if file_path.is_file() and not file_path.name.endswith(".part"):
-                    archive.write(file_path, arcname=file_path.name)
-        print("Đã tạo CBZ: {}".format(archive_path.name))
-        if not failed_pages:
-            shutil.rmtree(dest_folder)
-        else:
-            print("Giữ thư mục ảnh tạm vì có ảnh lỗi: {}".format(dest_folder.name))
-    else:
-        print("Đã lưu ảnh vào: {}".format(dest_folder))
-
-    return len(failed_pages)
-
-
-def start_download(settings, cli_overrides=None, direct=False):
-    overrides = cli_overrides or {}
-    lang_code = overrides.get("lang") or settings["lang"]
-    pack_format = overrides.get("pack_format") or settings["pack_format"]
-    outdir_value = overrides.get("outdir") or settings["outdir"]
-    datasaver = settings.get("datasaver", False)
-    if overrides.get("datasaver") is not None:
-        datasaver = overrides["datasaver"]
-    outdir = resolve_outdir(outdir_value)
-
-    prompt = "Enter manga URL or ID: " if direct else "Nhập URL truyện hoặc Manga ID: "
-    url = overrides.get("url")
-    while not url:
-        url = safe_input(prompt)
-        if url is None:
-            return
-        url = url.strip()
-        if not url:
-            url = None
-    try:
-        manga_id = find_manga_id(url)
-        manga_uuid = get_uuid(manga_id)
-        title = get_title(manga_uuid, lang_code)
-        print("\nTITLE: {}".format(html.unescape(title)))
-        chapters = get_chapters(manga_uuid, lang_code)
-        if not chapters:
-            print("No chapters available to download! (ngôn ngữ: {})".format(lang_code))
-            return
-        display_chapters(chapters)
-
-        print("\nĐang lấy danh sách nhóm dịch...")
-        group_names = get_group_names(chapters)
-        selected_chapters, selected_group = choose_group(chapters, group_names)
-        if not selected_chapters:
-            print("Nhóm dịch này không có chapter để tải.")
-            return
-        if selected_group != "Tất cả nhóm dịch":
-            print("\nNhóm dịch đã chọn: {}".format(selected_group))
-            display_chapters(selected_chapters, "Available chapters for selected group:")
-
-        chapter_prompt = "\nEnter chapter(s) to download: " if direct else "\nEnter chapter(s) to download: "
-        selection = safe_input(chapter_prompt)
-        if selection is None or not selection.strip():
-            print("Chưa chọn chapter. Đã hủy thao tác tải.")
-            return
-        requested = parse_chapter_selection(selection.strip(), selected_chapters)
-        if not requested:
-            print("Không có chapter hợp lệ để tải.")
-            return
-
-        print("\nNgôn ngữ: {} | Định dạng: {} | Nơi lưu: {}".format(
-            language_label(lang_code), pack_format_label(pack_format), outdir
-        ))
-        outdir.mkdir(parents=True, exist_ok=True)
-        total_errors = 0
-        for index, chapter in enumerate(requested, 1):
-            try:
-                total_errors += download_chapter(
-                    chapter, index, len(requested), title, outdir,
-                    group_names, pack_format, datasaver
-                )
-            except KeyboardInterrupt:
-                print("\nĐã nhận lệnh hủy. Các file đã tải sẽ được giữ lại.")
-                raise
-            except Exception as exc:
-                print("\nLỖI chapter {}: {}".format(chapter_number(chapter), exc))
-        if total_errors:
-            print("\nDone. Có {} ảnh tải lỗi. Xem cảnh báo ở trên.".format(total_errors))
-        else:
-            print("\nDone.")
-    except KeyboardInterrupt:
-        raise
-    except Exception as exc:
-        print("\nLỖI: {}".format(exc))
-
-
-def settings_menu(settings):
-    while True:
-        banner("SETTING")
-        print("  1. Language       [{}]".format(language_label(settings["lang"])))
-        print("  2. Đóng gói thành [{}]".format(pack_format_label(settings["pack_format"])))
-        print("  3. Nơi tải xuống  [{}]".format(display_path(settings["outdir"])))
-        print("\n  0. Quay lại")
-        line("-")
-        choice = safe_input("Chọn: ")
-        if choice is None or choice.strip() == "0":
-            return
-        choice = choice.strip()
-
-        if choice == "1":
-            banner("LANGUAGE")
-            for number, (code, label) in enumerate(LANGUAGES, 1):
-                current = "  [đang dùng]" if code == settings["lang"] else ""
-                print("  {}. {} ({}){}".format(number, label, code, current))
-            print("  {}. Nhập mã ngôn ngữ khác".format(len(LANGUAGES) + 1))
-            print("  0. Quay lại")
-            answer = safe_input("Chọn ngôn ngữ: ")
-            if answer is None or answer.strip() == "0" or not answer.strip():
-                continue
-            answer = answer.strip()
-            if answer.isdigit() and 1 <= int(answer) <= len(LANGUAGES):
-                settings["lang"] = LANGUAGES[int(answer) - 1][0]
-            elif answer == str(len(LANGUAGES) + 1):
-                code = safe_input("Nhập mã ngôn ngữ MangaDex (ví dụ: it, pl, tr): ")
-                if code and re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{2,8})?", code.strip().lower()):
-                    settings["lang"] = code.strip().lower()
-                else:
-                    print("Mã ngôn ngữ không hợp lệ.")
-                    pause()
-                    continue
-            else:
-                print("Lựa chọn không hợp lệ.")
-                pause()
-                continue
-            save_settings(settings)
-
-        elif choice == "2":
-            banner("ĐÓNG GÓI CHAPTER")
-            print("  1. Folder - lưu ảnh rời trong thư mục chapter")
-            print("  2. CBZ    - đóng gói mỗi chapter thành một file .cbz")
-            print("  0. Quay lại")
-            answer = safe_input("Chọn định dạng: ")
-            if answer is None or answer.strip() == "0" or not answer.strip():
-                continue
-            if answer.strip() == "1":
-                settings["pack_format"] = "FOLDER"
-            elif answer.strip() == "2":
-                settings["pack_format"] = "CBZ"
-            else:
-                print("Lựa chọn không hợp lệ.")
-                pause()
-                continue
-            save_settings(settings)
-
-        elif choice == "3":
-            banner("NƠI TẢI XUỐNG")
-            print("Thư mục hiện tại: {}".format(display_path(settings["outdir"])))
-            print("Nhập đường dẫn mới (đường dẫn tương đối tính từ thư mục chứa script).")
-            print("Để trống để giữ nguyên; nhập 'download' để dùng thư mục mặc định.")
-            answer = safe_input("Đường dẫn mới: ")
-            if answer is None or not answer.strip():
-                continue
-            settings["outdir"] = answer.strip()
-            save_settings(settings)
-            print("Đã lưu nơi tải xuống: {}".format(display_path(settings["outdir"])))
-            pause()
-        else:
-            print("Lựa chọn không hợp lệ.")
-            pause()
-
-
-def main_menu(settings):
-    while True:
-        banner("MANGADEX-DL v{}".format(A_VERSION))
-        print("\nMENU")
-        print("  1. Bắt đầu tải truyện")
-        print("  2. Cài đặt")
-        print("  0. Thoát")
-        line("-")
-        choice = safe_input("Chọn: ")
-        if choice is None or choice.strip() == "0":
-            print("Đã thoát MangaDex-DL.")
-            return
-        choice = choice.strip()
-        if choice == "1":
-            line("=")
-            try:
-                start_download(settings)
-            except KeyboardInterrupt:
-                print("\nĐã hủy thao tác.")
-            pause("Nhấn Enter để quay lại menu chính...")
-        elif choice == "2":
-            settings_menu(settings)
-        else:
-            print("Lựa chọn không hợp lệ.")
-            pause()
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Tải manga từ MangaDex (bản có menu PC/Termux)."
-    )
-    parser.add_argument("url", nargs="?", help="URL hoặc Manga ID (bỏ qua menu nếu cung cấp)")
-    parser.add_argument("-l", dest="lang", default=None,
-                        help="mã ngôn ngữ chapter, mặc định lấy từ cài đặt (ban đầu: vi)")
-    parser.add_argument("-d", dest="datasaver", action="store_true", default=None,
-                        help="tải ảnh data-saver, dung lượng thấp hơn")
-    parser.add_argument("-a", dest="cbz", action="store_true", default=None,
-                        help="đóng gói chapter thành CBZ")
-    parser.add_argument("--no-cbz", dest="no_cbz", action="store_true", default=None,
-                        help="lưu ảnh trong thư mục thay vì CBZ")
-    parser.add_argument("-o", dest="outdir", default=None,
-                        help="thư mục đầu ra")
-    return parser.parse_args()
-
-
-def cli_main(args, settings):
-    # Preserve the original command-line switches. No arguments opens the new menu.
-    direct = any(value is not None for value in (args.url, args.lang, args.datasaver,
-                                                  args.cbz, args.no_cbz, args.outdir))
-    if not direct:
-        main_menu(settings)
-        return
-    pack_format = None
-    if args.no_cbz:
-        pack_format = "FOLDER"
-    elif args.cbz:
-        pack_format = "CBZ"
-    overrides = {
-        "url": args.url,
-        "lang": args.lang,
-        "datasaver": args.datasaver,
-        "pack_format": pack_format,
-        "outdir": args.outdir,
-    }
-    try:
-        start_download(settings, overrides, direct=True)
-    except KeyboardInterrupt:
-        print("\nĐã hủy thao tác.")
-    pause("Nhấn Enter để kết thúc...")
-
-
-def main():
-    print("MangaDex-DL v{} | PC + Termux".format(A_VERSION))
-    settings = load_settings()
-    try:
-        cli_main(parse_args(), settings)
-    except KeyboardInterrupt:
-        print("\nĐã thoát chương trình.")
-    except Exception as exc:
-        print("LỖI: {}".format(exc))
-        pause("Nhấn Enter để đóng chương trình...")
+        print("ERROR: {}".format(exc))
+        pause("Press Enter to close the program...")
 
 
 if __name__ == "__main__":
