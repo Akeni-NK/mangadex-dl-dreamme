@@ -37,9 +37,7 @@ Original Project
 
 This project is based on:
 
-frozenpandaman/mangadex-dl
-
-https://github.com/frozenpandaman/mangadex-dl
+[frozenpandaman/mangadex-dl](https://github.com/frozenpandaman/mangadex-dl) 
 ---
 EN/[VI](README_VI.md) 
 ---
