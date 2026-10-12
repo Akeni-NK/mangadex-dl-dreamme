@@ -13,7 +13,7 @@ Tính năng
 - Hỗ trợ Windows & Termux
 - Giao diện terminal đơn giản
 
-Cài đặt
+Cài đặt và chạy
 
 Windows
 ```
@@ -22,14 +22,17 @@ cd mangadex-dl-dreamme
 pip install requests
 python mangadex-dl.py
 ```
-Termux 
+Termux (android) [yêu cầu cài đặt termux, termux:API] 
 ```
 pkg update
 pkg install python
 pip install requests
 git clone https://github.com/Akeni-NK/mangadex-dl-dreamme.git
+```
+Chạy:
+```
 cd mangadex-dl-dreamme
-python mangadex-dl.py
+Python mangadex-dl.py
 ```
 
 Dự án này được phát triển dựa trên:
