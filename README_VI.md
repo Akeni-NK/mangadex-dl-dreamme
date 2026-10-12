@@ -33,10 +33,8 @@ python mangadex-dl.py
 ```
 
 Dự án này được phát triển dựa trên:
-
-frozenpandaman/mangadex-dl
-
-https://github.com/frozenpandaman/mangadex-dl
+[frozenpandaman/mangadex-dl] 
+(https://github.com/frozenpandaman/mangadex-dl) 
 
 Language 
 - VI/[EN](README.md)
