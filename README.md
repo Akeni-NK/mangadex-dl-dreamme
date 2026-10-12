@@ -6,7 +6,7 @@ This fork adds improvements and personal modifications while keeping the origina
 
 Features
 
--The speed is 2 times higher than the old version(note: beware of IP blocking)🐧 
+- The speed is 2 times higher than the old version(note: beware of IP blocking)🐧 
 - Download manga from MangaDex
 - Select language and translation group
 - Select chapters to download
