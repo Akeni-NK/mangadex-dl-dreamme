@@ -39,7 +39,8 @@ frozenpandaman/mangadex-dl
 
 https://github.com/frozenpandaman/mangadex-dl
 
-- "🇻🇳 Tiếng Việt" (README_VI.md)
+- "🇻🇳 Tiếng Việt"(README_VI.md)
 ---
 AI-generated projects
+
 License: GPL-3.0
