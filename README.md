@@ -16,20 +16,22 @@ Features
 Installation
 
 Windows
-
-''git clone https://github.com/Akeni-NK/mangadex-dl-dreamme.git
+```
+git clone https://github.com/Akeni-NK/mangadex-dl-dreamme.git
 cd mangadex-dl-dreamme
 pip install requests
-python mangadex-dl.py''
+python mangadex-dl.py
+```
 
 Termux
-
+```
 pkg update
 pkg install python
 pip install requests
 git clone https://github.com/Akeni-NK/mangadex-dl-dreamme.git
 cd mangadex-dl-dreamme
 python mangadex-dl.py
+```
 
 Original Project
 
@@ -39,7 +41,7 @@ frozenpandaman/mangadex-dl
 
 https://github.com/frozenpandaman/mangadex-dl
 ---
-EN/[VI](master/README_VI.md) 
+EN/[VI](README_VI.md) 
 ---
 AI-generated projects
 
