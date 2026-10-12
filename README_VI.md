@@ -39,7 +39,7 @@ frozenpandaman/mangadex-dl
 https://github.com/frozenpandaman/mangadex-dl
 
 Language 
-- VI/"EN"(README.md)
+- VI/[EN](README.md)
 
 ---
 Dự án viết bằng Ai
