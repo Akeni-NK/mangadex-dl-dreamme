@@ -23,7 +23,7 @@ pip install requests
 python mangadex-dl.py
 ```
 
-Termux
+Termux (android) 
 ```
 pkg update
 pkg install python
