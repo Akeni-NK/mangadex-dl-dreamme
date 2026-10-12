@@ -39,7 +39,7 @@ frozenpandaman/mangadex-dl
 
 https://github.com/frozenpandaman/mangadex-dl
 ---
-EN/(VI)[https://github.com/Akeni-NK/mangadex-dl-dreamme/blob/master/README_VI.md] 
+EN/[VI] (README_VI.md) 
 ---
 AI-generated projects
 
