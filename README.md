@@ -17,10 +17,10 @@ Installation
 
 Windows
 
-git clone https://github.com/Akeni-NK/mangadex-dl-dreamme.git
+''git clone https://github.com/Akeni-NK/mangadex-dl-dreamme.git
 cd mangadex-dl-dreamme
 pip install requests
-python mangadex-dl.py
+python mangadex-dl.py''
 
 Termux
 
