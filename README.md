@@ -5,6 +5,7 @@ A modified version of mangadex-dl for downloading manga from MangaDex.
 This fork adds improvements and personal modifications while keeping the original project's simple terminal-based workflow.
 
 Features
+
 -The speed is 2 times higher than the old version(note: beware of IP blocking)🐧 
 - Download manga from MangaDex
 - Select language and translation group
